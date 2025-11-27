@@ -9,19 +9,20 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements
 COPY requirements.txt .
 
 # Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application files
 COPY . .
 
 # Expose port
 EXPOSE 10000
 
-# Run the application
-CMD gunicorn --bind 0.0.0.0:10000 --timeout 120 app:app
+# Run with increased timeout for AI processing
+CMD gunicorn --bind 0.0.0.0:10000 --workers 1 --timeout 300 --worker-class sync app:app
