@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from rembg import remove, new_session
 from PIL import Image
 import io
 import base64
@@ -9,12 +8,14 @@ import os
 app = Flask(__name__, static_folder='.')
 CORS(app)
 
-# Initialize AI models
-sessions = {
-    'u2net': new_session('u2net'),
-    'u2netp': new_session('u2netp'),
-    'u2net_human_seg': new_session('u2net_human_seg'),
-}
+# Import the simpler background remover
+try:
+    from transparent_background import Remover
+    remover = Remover(fast=True, jit=True, device='cpu')
+    print("✅ Background remover loaded!")
+except Exception as e:
+    print(f"⚠️ Error loading remover: {e}")
+    remover = None
 
 @app.route('/')
 def index():
@@ -27,43 +28,23 @@ def remove_background():
             return jsonify({'error': 'No image provided'}), 400
         
         file = request.files['image']
-        model = request.form.get('model', 'u2net')
-        
-        if model not in sessions:
-            model = 'u2net'
-        
-        input_image = Image.open(file.stream)
-        
-        # Convert to RGB if necessary
-        if input_image.mode in ('RGBA', 'LA', 'P'):
-            background = Image.new('RGB', input_image.size, (255, 255, 255))
-            if input_image.mode == 'P':
-                input_image = input_image.convert('RGBA')
-            background.paste(input_image, mask=input_image.split()[-1] if input_image.mode in ('RGBA', 'LA') else None)
-            input_image = background
-        elif input_image.mode != 'RGB':
-            input_image = input_image.convert('RGB')
+        input_image = Image.open(file.stream).convert('RGB')
         
         # Remove background
-        output_image = remove(
-            input_image,
-            session=sessions[model],
-            alpha_matting=True,
-            alpha_matting_foreground_threshold=240,
-            alpha_matting_background_threshold=10,
-            alpha_matting_erode_size=10
-        )
+        if remover:
+            output_image = remover.process(input_image, type='rgba')
+        else:
+            return jsonify({'error': 'Background remover not initialized'}), 500
         
         # Convert to base64
         img_io = io.BytesIO()
-        output_image.save(img_io, 'PNG', optimize=True)
+        output_image.save(img_io, 'PNG')
         img_io.seek(0)
         img_base64 = base64.b64encode(img_io.getvalue()).decode()
         
         return jsonify({
             'success': True,
-            'image': f'data:image/png;base64,{img_base64}',
-            'model_used': model
+            'image': f'data:image/png;base64,{img_base64}'
         })
     
     except Exception as e:
